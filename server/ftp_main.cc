@@ -2,4 +2,5 @@
 int main()
 {
     ftp ftp;
+    ftp.recv_command();
 }
