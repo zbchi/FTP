@@ -24,7 +24,8 @@ void threadPool::work()
     while (1)
     {
 
-        unique_lock<mutex> lock(m_consumer);;
+        unique_lock<mutex> lock(m_consumer);
+        ;
 
         {
             {

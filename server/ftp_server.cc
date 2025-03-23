@@ -41,22 +41,8 @@ void ftp::passive_connect(int command_cfd)
         log(client_addr, "connect");
 }
 
-void ftp::recv_command()
+void ftp::handle_command(int cfd)
 {
-    struct sockaddr_in addr;
-    int lfd = create_listen_socket(2100, addr);
-    int opt = 1;
-    setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
-    struct sockaddr_in client_addr;
-    socklen_t len = sizeof(client_addr);
-    int cfd = accept(lfd, (struct sockaddr *)&client_addr, &len);
-
-    if (cfd == -1)
-        perror("accept");
-    else
-        log(client_addr, "connect");
-
     char buf[1024];
     while (1)
     {
@@ -74,4 +60,41 @@ void ftp::log(struct sockaddr_in connect_addr, char *event)
     inet_ntop(AF_INET, &connect_addr.sin_addr.s_addr, ip, INET_ADDRSTRLEN);
     if (strcmp("connect", event) == 0)
         cout << "Connected  IP:" << ip << "  port:" << port << endl;
+}
+
+void ftp::epoll()
+{
+    struct sockaddr_in addr;
+    int lfd = create_listen_socket(SERVER_PORT, addr);
+
+    int epfd = epoll_create(1024);
+    struct epoll_event ev;
+    ev.data.fd = lfd;
+    epoll_ctl(epfd, EPOLL_CTL_ADD, lfd, &ev);
+    struct epoll_event evs[1024];
+    int size = sizeof(evs) / sizeof(evs[0]);
+    while (1)
+    {
+        int num = epoll_wait(epfd, evs, size, -1);
+        for (int i = 0; i < num; i++)
+        {
+            int curfd = evs[i].data.fd;
+            if (curfd == lfd)
+            {
+                struct sockaddr_in client_addr;
+                socklen_t len = sizeof(client_addr);
+                int cfd = accept(lfd, (struct sockaddr *)&client_addr, &len);
+                log(client_addr, "connect");
+
+                ev.data.fd = cfd;
+                ev.events = EPOLLIN;
+                epoll_ctl(epfd, EPOLL_CTL_ADD, cfd, &ev);
+            }
+            else
+            {
+                handle_command(curfd);
+            }
+        }
+    }
+    close(lfd);
 }
