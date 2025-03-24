@@ -44,13 +44,11 @@ void ftp::passive_connect(int command_cfd)
 void ftp::handle_command(int cfd)
 {
     char buf[1024];
-    while (1)
-    {
-        memset(buf, 0, sizeof(buf));
-        recv(cfd, buf, sizeof(buf), 0);
-        if (strcmp(buf, "PASV") == 0)
-            passive_connect(cfd);
-    }
+
+    memset(buf, 0, sizeof(buf));
+    recv(cfd, buf, sizeof(buf), 0);
+    if (strcmp(buf, "PASV") == 0)
+        passive_connect(cfd);
 }
 
 void ftp::log(struct sockaddr_in connect_addr, char *event)
@@ -70,6 +68,7 @@ void ftp::epoll()
     int epfd = epoll_create(1024);
     struct epoll_event ev;
     ev.data.fd = lfd;
+    ev.events = EPOLLIN;
     epoll_ctl(epfd, EPOLL_CTL_ADD, lfd, &ev);
     struct epoll_event evs[1024];
     int size = sizeof(evs) / sizeof(evs[0]);

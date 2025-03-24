@@ -7,7 +7,9 @@ int ftp::create_connect_socket(int port, string ip)
     inet_pton(AF_INET, ip.c_str(), &addr.sin_addr.s_addr);
     addr.sin_port = htons(port);
 
-    connect(cfd, (struct sockaddr *)&addr, sizeof(addr));
+    int ret = connect(cfd, (struct sockaddr *)&addr, sizeof(addr));
+    if (ret == -1)
+        perror("connect");
     return cfd;
 }
 void ftp::send_command()
