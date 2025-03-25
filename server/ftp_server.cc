@@ -20,6 +20,10 @@ int ftp::create_listen_socket(int port, struct sockaddr_in &addr)
     return lfd;
 }
 
+int ftp::active_connect(int command_cfd)
+{
+}
+
 int ftp::passive_connect(int command_cfd)
 {
     struct sockaddr_in getport_addr;
@@ -65,17 +69,18 @@ void ftp::handle_command(FD &cfd)
     vector<string> commands = splite_argv(command);
 
     if (strcmp(commands[0].c_str(), "PASV") == 0)
-
-    {
-        cout << "recv: PASV" << endl;
         cfd.is_passive = true;
-    }
-    if (strcmp(commands[0].c_str(), "STOR") == 0)
-    {
-        cout << commands[1] << endl;
+    else if (strcmp(commands[0].c_str(), "PORT") == 0)
+        cfd.is_passive = false;
+    else if (strcmp(commands[0].c_str(), "STOR") == 0)
         pool.add_task([this, &cfd, &commands]()
                       { handle_stor(cfd, commands[1]); });
-    }
+    else if (strcmp(commands[0].c_str(), "RETR") == 0)
+        pool.add_task([this, &cfd, &commands]()
+                      { handle_retr(cfd, commands[1]); });
+    else if (strcmp(commands[0].c_str(), "LIST") == 0)
+        pool.add_task([this, &cfd]
+                      { handle_list(cfd); });
 }
 
 void ftp::handle_stor(FD cfd, string &file_name)
@@ -87,7 +92,6 @@ void ftp::handle_stor(FD cfd, string &file_name)
 
     string file_path = SERVER_DIR;
     file_path += file_name;
-    cout << file_path << endl;
     ofstream file(file_path, ios::binary);
 
     if (!file.is_open())
@@ -104,6 +108,52 @@ void ftp::handle_stor(FD cfd, string &file_name)
         file.write(buffer, bytes_recved);
 
     file.close();
+    close(data_fd);
+}
+
+void ftp::handle_retr(FD cfd, string &file_name)
+{
+    int data_fd;
+    if (cfd.is_passive)
+        data_fd = passive_connect(cfd.fd);
+
+    string file_path = SERVER_DIR;
+    file_path += file_name;
+    ifstream file(file_path, ios::binary);
+    if (!file.is_open())
+    {
+        cerr << "无法打开文件: " << file_path << endl;
+        close(data_fd);
+        return;
+    }
+
+    char buffer[4096];
+    while (1)
+    {
+        file.read(buffer, sizeof(buffer));
+        if (file.gcount() <= 0)
+            break;
+
+        send(data_fd, buffer, file.gcount(), 0);
+    }
+    file.close();
+    close(data_fd);
+}
+
+void ftp::handle_list(FD cfd)
+{
+    int data_fd;
+    if (cfd.is_passive)
+        data_fd = passive_connect(cfd.fd);
+
+    pid_t pid = fork();
+
+    if (pid == 0)
+    {
+        dup2(data_fd, STDOUT_FILENO);
+        execlp("ls", "ls", "-ls", SERVER_DIR, (char *)NULL);
+        close(data_fd);
+    }
     close(data_fd);
 }
 

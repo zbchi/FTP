@@ -17,9 +17,16 @@ public:
         int fd;
         bool is_passive;
     };
+
     int create_connect_socket(int port, string ip);
+
     void send_command();
-    int passive_connect(int command_cfd);
-    vector<string> splite_argv(const string &strp);
     void handle_stor(FD cfd, string &file_name);
+    void handle_retr(FD cfd, string &file_name);
+    void handle_list(FD cfd);
+
+    int passive_connect(int command_cfd);
+    int active_connect(int command_cfd);
+
+    vector<string> splite_argv(const string &strp);
 };

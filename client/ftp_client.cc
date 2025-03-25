@@ -34,16 +34,24 @@ void ftp::send_command()
         vector<string> commands = splite_argv(command);
         if (strcmp(commands[0].c_str(), "PASV") == 0)
             cfd.is_passive = true;
-        if (strcmp(commands[0].c_str(), "STOR") == 0)
+        else if (strcmp(commands[0].c_str(), "PORT") == 0)
+            cfd.is_passive = false;
+        else if (strcmp(commands[0].c_str(), "STOR") == 0)
             handle_stor(cfd, commands[1]);
+        else if (strcmp(commands[0].c_str(), "RETR") == 0)
+            handle_retr(cfd, commands[1]);
+        else if (strcmp(commands[0].c_str(), "LIST") == 0)
+            handle_list(cfd);
     }
 }
+
+int ftp::active_connect(int command_cfd)
+{
+}
+
 int ftp::passive_connect(int command_cfd)
 {
     char buf[64];
-    strcpy(buf, "PASV");
-    // send(command_cfd, buf, strlen(buf) + 1, 0);
-
     memset(buf, 0, sizeof(buf));
     int ret = recv(command_cfd, buf, sizeof(buf), 0);
     if (ret == -1)
@@ -73,7 +81,6 @@ vector<string> ftp::splite_argv(const string &strp)
 
 void ftp::handle_stor(FD cfd, string &file_name)
 {
-
     int data_fd;
     if (cfd.is_passive)
         data_fd = passive_connect(cfd.fd);
@@ -98,5 +105,44 @@ void ftp::handle_stor(FD cfd, string &file_name)
         send(data_fd, buffer, file.gcount(), 0);
     }
     file.close();
+    close(data_fd);
+}
+
+void ftp::handle_retr(FD cfd, string &file_name)
+{
+    int data_fd;
+    if (cfd.is_passive)
+        data_fd = passive_connect(cfd.fd);
+
+    string file_path = CLIENT_DIR;
+    file_path += file_name;
+    ofstream file(file_path, ios::binary);
+
+    if (!file.is_open())
+    {
+        cerr << "无法打开文件: " << file_path << endl;
+        close(data_fd);
+        return;
+    }
+
+    char buffer[4096];
+    ssize_t bytes_recved;
+    while ((bytes_recved = recv(data_fd, buffer, sizeof(buffer), 0)) > 0)
+        file.write(buffer, bytes_recved);
+
+    file.close();
+    close(data_fd);
+}
+
+void ftp::handle_list(FD cfd)
+{
+    int data_fd;
+    if (cfd.is_passive)
+        data_fd = passive_connect(cfd.fd);
+
+    char buffer[4096];
+    ssize_t bytes_recved;
+    while ((bytes_recved = recv(data_fd, buffer, sizeof(buffer), 0)) > 0)
+        write(STDOUT_FILENO, buffer, bytes_recved);
     close(data_fd);
 }
