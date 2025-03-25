@@ -21,8 +21,10 @@ void ftp::send_command()
     char buf[1024];
     while (1)
     {
+        memset(buf, 0, sizeof(buf));
         std::cin >> buf;
-        if (strcmp(buf, "PASV") == 0)
+        send(cfd, buf, strlen(buf) + 1, 0);
+        if (strcmp(buf, "STOR") == 0)
             passive_connect(cfd);
     }
 }
@@ -30,7 +32,7 @@ int ftp::passive_connect(int command_cfd)
 {
     char buf[64];
     strcpy(buf, "PASV");
-    send(command_cfd, buf, strlen(buf) + 1, 0);
+    // send(command_cfd, buf, strlen(buf) + 1, 0);
 
     memset(buf, 0, sizeof(buf));
     int ret = recv(command_cfd, buf, sizeof(buf), 0);

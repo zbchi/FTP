@@ -7,9 +7,19 @@
 class ftp
 {
 public:
+    class FD
+    {
+    public:
+        int fd;
+        bool passive;
+    };
+    ftp();
     int create_listen_socket(int port, struct sockaddr_in &addr);
-    void handle_command(int cfd);
-    void passive_connect(int cfd);
+    void handle_command(FD &cfd);
+    int passive_connect(int command_cfd);
     void log(struct sockaddr_in connect_addr, char *event);
     void epoll();
+    void handle_stor(FD cfd);
+private:
+    threadPool pool;
 };

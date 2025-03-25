@@ -1,5 +1,7 @@
 #include "ftp_server.h"
-
+ftp::ftp() : pool(16)
+{
+}
 int ftp::create_listen_socket(int port, struct sockaddr_in &addr)
 {
     int lfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -12,7 +14,7 @@ int ftp::create_listen_socket(int port, struct sockaddr_in &addr)
     listen(lfd, 128);
     return lfd;
 }
-void ftp::passive_connect(int command_cfd)
+int ftp::passive_connect(int command_cfd)
 {
     struct sockaddr_in getport_addr;
     socklen_t getport_len = sizeof(getport_addr);
@@ -39,16 +41,29 @@ void ftp::passive_connect(int command_cfd)
         perror("accept");
     else
         log(client_addr, "connect");
+    return cfd;
 }
 
-void ftp::handle_command(int cfd)
+void ftp::handle_command(FD &cfd)
 {
     char buf[1024];
+    while (1)
+    {
+        memset(buf, 0, sizeof(buf));
+        recv(cfd.fd, buf, sizeof(buf), 0);
+        if (strcmp(buf, "PASV") == 0)
+            cfd.passive = true;
 
-    memset(buf, 0, sizeof(buf));
-    recv(cfd, buf, sizeof(buf), 0);
-    if (strcmp(buf, "PASV") == 0)
-        passive_connect(cfd);
+        if (strcmp(buf, "STOR") == 0)
+            pool.add_task([this, &cfd]()
+                          { handle_stor(cfd); });
+    }
+}
+
+void ftp::handle_stor(FD cfd)
+{
+    if (cfd.passive)
+        int data_fd = passive_connect(cfd.fd);
 }
 
 void ftp::log(struct sockaddr_in connect_addr, char *event)
@@ -78,20 +93,22 @@ void ftp::epoll()
         for (int i = 0; i < num; i++)
         {
             int curfd = evs[i].data.fd;
+            FD cfd;
             if (curfd == lfd)
             {
                 struct sockaddr_in client_addr;
                 socklen_t len = sizeof(client_addr);
-                int cfd = accept(lfd, (struct sockaddr *)&client_addr, &len);
+
+                cfd.fd = accept(lfd, (struct sockaddr *)&client_addr, &len);
                 log(client_addr, "connect");
 
-                ev.data.fd = cfd;
+                ev.data.fd = cfd.fd;
                 ev.events = EPOLLIN;
-                epoll_ctl(epfd, EPOLL_CTL_ADD, cfd, &ev);
+                epoll_ctl(epfd, EPOLL_CTL_ADD, cfd.fd, &ev);
             }
             else
             {
-                handle_command(curfd);
+                handle_command(cfd);
             }
         }
     }
