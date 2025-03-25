@@ -2,9 +2,14 @@
 ftp::ftp() : pool(16)
 {
 }
+
 int ftp::create_listen_socket(int port, struct sockaddr_in &addr)
 {
     int lfd = socket(AF_INET, SOCK_STREAM, 0);
+
+    int opt = 1;
+    setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(port);
@@ -14,6 +19,7 @@ int ftp::create_listen_socket(int port, struct sockaddr_in &addr)
     listen(lfd, 128);
     return lfd;
 }
+
 int ftp::passive_connect(int command_cfd)
 {
     struct sockaddr_in getport_addr;
@@ -47,23 +53,58 @@ int ftp::passive_connect(int command_cfd)
 void ftp::handle_command(FD &cfd)
 {
     char buf[1024];
-    while (1)
-    {
-        memset(buf, 0, sizeof(buf));
-        recv(cfd.fd, buf, sizeof(buf), 0);
-        if (strcmp(buf, "PASV") == 0)
-            cfd.passive = true;
 
-        if (strcmp(buf, "STOR") == 0)
-            pool.add_task([this, &cfd]()
-                          { handle_stor(cfd); });
+    memset(buf, 0, sizeof(buf));
+    int read_len = recv(cfd.fd, buf, sizeof(buf), 0);
+    if (read_len <= 0)
+        return;
+
+    cout << buf << endl;
+
+    string command(buf, read_len);
+    vector<string> commands = splite_argv(command);
+
+    if (strcmp(commands[0].c_str(), "PASV") == 0)
+
+    {
+        cout << "recv: PASV" << endl;
+        cfd.is_passive = true;
+    }
+    if (strcmp(commands[0].c_str(), "STOR") == 0)
+    {
+        cout << commands[1] << endl;
+        pool.add_task([this, &cfd, &commands]()
+                      { handle_stor(cfd, commands[1]); });
     }
 }
 
-void ftp::handle_stor(FD cfd)
+void ftp::handle_stor(FD cfd, string &file_name)
 {
-    if (cfd.passive)
-        int data_fd = passive_connect(cfd.fd);
+
+    int data_fd;
+    if (cfd.is_passive)
+        data_fd = passive_connect(cfd.fd);
+
+    string file_path = SERVER_DIR;
+    file_path += file_name;
+    cout << file_path << endl;
+    ofstream file(file_path, ios::binary);
+
+    if (!file.is_open())
+    {
+        cerr << "无法打开文件: " << file_path << endl;
+        close(data_fd);
+        return;
+    }
+
+    char buffer[4096];
+    ssize_t bytes_recved;
+    while ((bytes_recved = recv(data_fd, buffer, sizeof(buffer), 0)) > 0)
+
+        file.write(buffer, bytes_recved);
+
+    file.close();
+    close(data_fd);
 }
 
 void ftp::log(struct sockaddr_in connect_addr, char *event)
@@ -108,9 +149,23 @@ void ftp::epoll()
             }
             else
             {
+                cfd.fd = curfd;
                 handle_command(cfd);
             }
         }
     }
     close(lfd);
+}
+
+vector<string> ftp::splite_argv(const string &strp)
+{
+    vector<string> args;
+    istringstream stream(strp);
+    string arg;
+    while (stream >> arg)
+    {
+        args.push_back(arg);
+    }
+
+    return args;
 }
