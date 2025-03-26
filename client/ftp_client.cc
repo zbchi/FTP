@@ -56,6 +56,7 @@ void ftp::send_command()
         {
             cfd.is_passive = false;
             cfd.active_port = commands[1];
+            cfd.listen_fd = active_listen(cfd);
         }
         else if (strcmp(commands[0].c_str(), "STOR") == 0)
             handle_stor(cfd, commands[1]);
@@ -66,12 +67,11 @@ void ftp::send_command()
     }
 }
 
-int ftp::active_connect(FD &cfd)
+int ftp::active_listen(FD &cfd)
 {
     struct sockaddr_in local_addr;
     int lfd = create_listen_socket(stoi(cfd.active_port), local_addr);
-
-    send(cfd.fd,cfd.active_port.c_str(),cfd.active_port.size(),0);
+    return lfd;
 }
 
 int ftp::passive_connect(int command_cfd)
@@ -164,6 +164,8 @@ void ftp::handle_list(FD cfd)
     int data_fd;
     if (cfd.is_passive)
         data_fd = passive_connect(cfd.fd);
+    else
+        data_fd = accept(cfd.listen_fd, NULL, NULL);
 
     char buffer[4096];
     ssize_t bytes_recved;

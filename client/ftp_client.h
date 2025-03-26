@@ -18,6 +18,7 @@ public:
         sockaddr_in addr;
         bool is_passive;
         string active_port;
+        int listen_fd;
     };
 
     int create_connect_socket(int port, string ip);
@@ -29,7 +30,7 @@ public:
     void handle_list(FD cfd);
 
     int passive_connect(int command_cfd);
-    int active_connect(FD &cfd);
+    int active_listen(FD &cfd);
 
     vector<string> splite_argv(const string &strp);
 };

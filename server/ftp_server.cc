@@ -34,12 +34,6 @@ int ftp::create_connect_socket(int port, string ip)
     return cfd;
 }
 
-int ftp::active_connect(client_info *client)
-{
-    char buffer[64];
-    recv(client->fd, buffer, sizeof(buffer), 0);
-}
-
 int ftp::passive_connect(int command_cfd)
 {
     struct sockaddr_in getport_addr;
@@ -70,6 +64,22 @@ int ftp::passive_connect(int command_cfd)
     return cfd;
 }
 
+int ftp::active_connect(client_info *client)
+{
+    int cfd = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in addr;
+    addr = client->addr;
+    addr.sin_port = htons(stoi(client->active_port));
+    int ret = connect(cfd, (struct sockaddr *)&addr, sizeof(addr));
+    if (ret == -1)
+    {
+        perror("connect");
+        return -1;
+    }
+    log(addr, "connect");
+    return cfd;
+}
+
 void ftp::handle_command(client_info *client)
 {
     char buf[1024];
@@ -87,7 +97,10 @@ void ftp::handle_command(client_info *client)
     if (strcmp(commands[0].c_str(), "PASV") == 0)
         client->is_passive = true;
     else if (strcmp(commands[0].c_str(), "PORT") == 0)
+    {
         client->is_passive = false;
+        client->active_port = commands[1];
+    }
     else if (strcmp(commands[0].c_str(), "STOR") == 0)
         pool.add_task([this, client, &commands]()
                       { handle_stor(client, commands[1]); });
@@ -161,7 +174,8 @@ void ftp::handle_list(client_info *client)
     int data_fd;
     if (client->is_passive)
         data_fd = passive_connect(client->fd);
-
+    else
+        data_fd = active_connect(client);
     pid_t pid = fork();
 
     if (pid == 0)
