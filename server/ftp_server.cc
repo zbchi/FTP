@@ -20,8 +20,24 @@ int ftp::create_listen_socket(int port, struct sockaddr_in &addr)
     return lfd;
 }
 
-int ftp::active_connect(int command_cfd)
+int ftp::create_connect_socket(int port, string ip)
 {
+    int cfd = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    inet_pton(AF_INET, ip.c_str(), &addr.sin_addr.s_addr);
+    addr.sin_port = htons(port);
+
+    int ret = connect(cfd, (struct sockaddr *)&addr, sizeof(addr));
+    if (ret == -1)
+        perror("connect");
+    return cfd;
+}
+
+int ftp::active_connect(client_info *client)
+{
+    char buffer[64];
+    recv(client->fd, buffer, sizeof(buffer), 0);
 }
 
 int ftp::passive_connect(int command_cfd)
@@ -54,12 +70,12 @@ int ftp::passive_connect(int command_cfd)
     return cfd;
 }
 
-void ftp::handle_command(FD &cfd)
+void ftp::handle_command(client_info *client)
 {
     char buf[1024];
 
     memset(buf, 0, sizeof(buf));
-    int read_len = recv(cfd.fd, buf, sizeof(buf), 0);
+    int read_len = recv(client->fd, buf, sizeof(buf), 0);
     if (read_len <= 0)
         return;
 
@@ -69,26 +85,26 @@ void ftp::handle_command(FD &cfd)
     vector<string> commands = splite_argv(command);
 
     if (strcmp(commands[0].c_str(), "PASV") == 0)
-        cfd.is_passive = true;
+        client->is_passive = true;
     else if (strcmp(commands[0].c_str(), "PORT") == 0)
-        cfd.is_passive = false;
+        client->is_passive = false;
     else if (strcmp(commands[0].c_str(), "STOR") == 0)
-        pool.add_task([this, &cfd, &commands]()
-                      { handle_stor(cfd, commands[1]); });
+        pool.add_task([this, client, &commands]()
+                      { handle_stor(client, commands[1]); });
     else if (strcmp(commands[0].c_str(), "RETR") == 0)
-        pool.add_task([this, &cfd, &commands]()
-                      { handle_retr(cfd, commands[1]); });
+        pool.add_task([this, client, &commands]()
+                      { handle_retr(client, commands[1]); });
     else if (strcmp(commands[0].c_str(), "LIST") == 0)
-        pool.add_task([this, &cfd]
-                      { handle_list(cfd); });
+        pool.add_task([this, client]
+                      { handle_list(client); });
 }
 
-void ftp::handle_stor(FD cfd, string &file_name)
+void ftp::handle_stor(client_info *client, string &file_name)
 {
 
     int data_fd;
-    if (cfd.is_passive)
-        data_fd = passive_connect(cfd.fd);
+    if (client->is_passive)
+        data_fd = passive_connect(client->fd);
 
     string file_path = SERVER_DIR;
     file_path += file_name;
@@ -111,11 +127,11 @@ void ftp::handle_stor(FD cfd, string &file_name)
     close(data_fd);
 }
 
-void ftp::handle_retr(FD cfd, string &file_name)
+void ftp::handle_retr(client_info *client, string &file_name)
 {
     int data_fd;
-    if (cfd.is_passive)
-        data_fd = passive_connect(cfd.fd);
+    if (client->is_passive)
+        data_fd = passive_connect(client->fd);
 
     string file_path = SERVER_DIR;
     file_path += file_name;
@@ -140,11 +156,11 @@ void ftp::handle_retr(FD cfd, string &file_name)
     close(data_fd);
 }
 
-void ftp::handle_list(FD cfd)
+void ftp::handle_list(client_info *client)
 {
     int data_fd;
-    if (cfd.is_passive)
-        data_fd = passive_connect(cfd.fd);
+    if (client->is_passive)
+        data_fd = passive_connect(client->fd);
 
     pid_t pid = fork();
 
@@ -164,6 +180,8 @@ void ftp::log(struct sockaddr_in connect_addr, char *event)
     inet_ntop(AF_INET, &connect_addr.sin_addr.s_addr, ip, INET_ADDRSTRLEN);
     if (strcmp("connect", event) == 0)
         cout << "Connected  IP:" << ip << "  port:" << port << endl;
+    else if (strcmp("disconnect", event) == 0)
+        cout << "Disconnected  IP:" << ip << "  port:" << port << endl;
 }
 
 void ftp::epoll()
@@ -173,7 +191,10 @@ void ftp::epoll()
 
     int epfd = epoll_create(1024);
     struct epoll_event ev;
-    ev.data.fd = lfd;
+
+    client_info listen_socket{lfd, NULL, NULL, NULL};
+
+    ev.data.ptr = &listen_socket;
     ev.events = EPOLLIN;
     epoll_ctl(epfd, EPOLL_CTL_ADD, lfd, &ev);
     struct epoll_event evs[1024];
@@ -183,24 +204,36 @@ void ftp::epoll()
         int num = epoll_wait(epfd, evs, size, -1);
         for (int i = 0; i < num; i++)
         {
-            int curfd = evs[i].data.fd;
-            FD cfd;
+            client_info *current_client = (client_info *)evs[i].data.ptr;
+
+            int curfd = current_client->fd;
             if (curfd == lfd)
             {
+
                 struct sockaddr_in client_addr;
                 socklen_t len = sizeof(client_addr);
 
-                cfd.fd = accept(lfd, (struct sockaddr *)&client_addr, &len);
+                int cfd = accept(lfd, (struct sockaddr *)&client_addr, &len);
                 log(client_addr, "connect");
 
-                ev.data.fd = cfd.fd;
+                client_info *client = new client_info{cfd, client_addr, false, ""};
+                ev.data.ptr = client;
                 ev.events = EPOLLIN;
-                epoll_ctl(epfd, EPOLL_CTL_ADD, cfd.fd, &ev);
+                epoll_ctl(epfd, EPOLL_CTL_ADD, cfd, &ev);
             }
             else
             {
-                cfd.fd = curfd;
-                handle_command(cfd);
+                char buf[1024];
+                int ret = recv(current_client->fd, buf, sizeof(buf), MSG_PEEK);
+                if (ret == 0 || (ret == -1 && errno != EAGAIN))
+                {
+                    log(current_client->addr, "disconnect");
+                    epoll_ctl(epfd, EPOLL_CTL_DEL, current_client->fd, NULL);
+                    close(current_client->fd);
+                    delete current_client;
+                    continue;
+                }
+                handle_command(current_client);
             }
         }
     }

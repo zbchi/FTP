@@ -15,10 +15,13 @@ public:
     {
     public:
         int fd;
+        sockaddr_in addr;
         bool is_passive;
+        string active_port;
     };
 
     int create_connect_socket(int port, string ip);
+    int create_listen_socket(int port, struct sockaddr_in &addr);
 
     void send_command();
     void handle_stor(FD cfd, string &file_name);
@@ -26,7 +29,7 @@ public:
     void handle_list(FD cfd);
 
     int passive_connect(int command_cfd);
-    int active_connect(int command_cfd);
+    int active_connect(FD &cfd);
 
     vector<string> splite_argv(const string &strp);
 };

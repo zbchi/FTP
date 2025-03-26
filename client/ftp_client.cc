@@ -12,6 +12,24 @@ int ftp::create_connect_socket(int port, string ip)
         perror("connect");
     return cfd;
 }
+
+int ftp::create_listen_socket(int port, struct sockaddr_in &addr)
+{
+    int lfd = socket(AF_INET, SOCK_STREAM, 0);
+
+    int opt = 0;
+    setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(port);
+    int ret = bind(lfd, (struct sockaddr *)&addr, sizeof(addr));
+    if (ret == -1)
+        perror("bind");
+    listen(lfd, 128);
+    return lfd;
+}
+
 void ftp::send_command()
 {
     string ip;
@@ -35,7 +53,10 @@ void ftp::send_command()
         if (strcmp(commands[0].c_str(), "PASV") == 0)
             cfd.is_passive = true;
         else if (strcmp(commands[0].c_str(), "PORT") == 0)
+        {
             cfd.is_passive = false;
+            cfd.active_port = commands[1];
+        }
         else if (strcmp(commands[0].c_str(), "STOR") == 0)
             handle_stor(cfd, commands[1]);
         else if (strcmp(commands[0].c_str(), "RETR") == 0)
@@ -45,8 +66,12 @@ void ftp::send_command()
     }
 }
 
-int ftp::active_connect(int command_cfd)
+int ftp::active_connect(FD &cfd)
 {
+    struct sockaddr_in local_addr;
+    int lfd = create_listen_socket(stoi(cfd.active_port), local_addr);
+
+    send(cfd.fd,cfd.active_port.c_str(),cfd.active_port.size(),0);
 }
 
 int ftp::passive_connect(int command_cfd)

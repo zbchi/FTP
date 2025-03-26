@@ -13,22 +13,25 @@
 class ftp
 {
 public:
-    class FD
+    struct client_info
     {
-    public:
         int fd;
+        sockaddr_in addr;
         bool is_passive;
+        string active_port;
     };
+
     ftp();
     int create_listen_socket(int port, struct sockaddr_in &addr);
+    int create_connect_socket(int port, string ip);
 
-    void handle_command(FD &cfd);
-    void handle_stor(FD cfd, string &file_name);
-    void handle_retr(FD cfd, string &file_name);
-    void handle_list(FD cfd);
+    void handle_command(ftp::client_info *client);
+    void handle_stor(ftp::client_info *client, string &file_name);
+    void handle_retr(ftp::client_info *client, string &file_name);
+    void handle_list(ftp::client_info *client);
 
     int passive_connect(int command_cfd);
-    int active_connect(int command_cfd);
+    int active_connect(ftp::client_info *client);
 
     void log(struct sockaddr_in connect_addr, char *event);
 
