@@ -1,4 +1,7 @@
 #include "ftp_client.h"
+ftp::ftp() : pool(4)
+{
+}
 int ftp::create_connect_socket(int port, string ip)
 {
     int cfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -25,18 +28,26 @@ int ftp::create_listen_socket(int port, struct sockaddr_in &addr)
     addr.sin_port = htons(port);
     int ret = bind(lfd, (struct sockaddr *)&addr, sizeof(addr));
     if (ret == -1)
+    {
         perror("bind");
+        return -1;
+    }
     listen(lfd, 128);
     return lfd;
 }
 
 void ftp::send_command()
 {
+    create_dir();
+
     string ip;
     cin >> ip;
 
-    FD cfd;
+    client_info cfd;
+    cfd.is_passive = -1;
     cfd.fd = create_connect_socket(2100, ip);
+    log(&cfd, "connect");
+
     cin.ignore();
     char buf[1024];
 
@@ -46,39 +57,56 @@ void ftp::send_command()
         command.clear();
 
         getline(cin, command);
-
-        cout << "cin command:" << command << endl;
         send(cfd.fd, command.c_str(), command.size(), 0);
         vector<string> commands = splite_argv(command);
         if (strcmp(commands[0].c_str(), "PASV") == 0)
-            cfd.is_passive = true;
-        else if (strcmp(commands[0].c_str(), "PORT") == 0)
         {
-            cfd.is_passive = false;
+            cfd.is_passive = true;
+            passive_getinfo(&cfd);
+        }
+        else if (strcmp(commands[0].c_str(), "PORT") == 0 && commands.size() == 2)
+        {
             cfd.active_port = commands[1];
             cfd.listen_fd = active_listen(cfd);
+            if (cfd.listen_fd == -1)
+                return;
+            cfd.is_passive = false;
         }
-        else if (strcmp(commands[0].c_str(), "STOR") == 0)
-            handle_stor(cfd, commands[1]);
-        else if (strcmp(commands[0].c_str(), "RETR") == 0)
-            handle_retr(cfd, commands[1]);
+        else if (strcmp(commands[0].c_str(), "STOR") == 0 && commands.size() == 2)
+            pool.add_task([this, &cfd, &commands]
+                          { handle_stor(&cfd, commands[1]); });
+        else if (strcmp(commands[0].c_str(), "RETR") == 0 && commands.size() == 2)
+            pool.add_task([this, &cfd, &commands]
+                          { handle_retr(&cfd, commands[1]); });
         else if (strcmp(commands[0].c_str(), "LIST") == 0)
-            handle_list(cfd);
+            handle_list(&cfd);
+
+        log(&cfd, "connect");
     }
 }
 
-int ftp::active_listen(FD &cfd)
+int ftp::active_listen(client_info &cfd)
 {
     struct sockaddr_in local_addr;
-    int lfd = create_listen_socket(stoi(cfd.active_port), local_addr);
+    int port;
+    try
+    {
+        port = stoi(cfd.active_port);
+    }
+    catch (const invalid_argument &e)
+    {
+        cout << "[Invalid Argument]";
+        return -1;
+    }
+    int lfd = create_listen_socket(port, local_addr);
     return lfd;
 }
 
-int ftp::passive_connect(int command_cfd)
+void ftp::passive_getinfo(client_info *cfd)
 {
     char buf[64];
     memset(buf, 0, sizeof(buf));
-    int ret = recv(command_cfd, buf, sizeof(buf), 0);
+    int ret = recv(cfd->fd, buf, sizeof(buf), 0);
     if (ret == -1)
         perror("recv");
     if (ret == 0)
@@ -86,11 +114,36 @@ int ftp::passive_connect(int command_cfd)
     cout << buf << endl;
     int a, b, c, d, e, f;
     sscanf(buf, "227 Entering Passive Mode(%d,%d,%d,%d,%d,%d).", &a, &b, &c, &d, &e, &f);
-    string server_ip = to_string(a) + "." + to_string(b) + "." + to_string(c) + "." + to_string(d);
-    int port = e * 256 + f;
-    int cfd = create_connect_socket(port, server_ip);
-    return cfd;
+    cfd->passive_serverip = to_string(a) + "." + to_string(b) + "." + to_string(c) + "." + to_string(d);
+    cfd->passive_serverport = e * 256 + f;
 }
+
+int ftp::passive_connect(client_info *cfd)
+{
+    int data_fd = create_connect_socket(cfd->passive_serverport, cfd->passive_serverip);
+    return data_fd;
+}
+
+int ftp::select_mode_connect(client_info *cfd)
+{
+    if (cfd->is_passive == -1)
+    {
+        log(cfd, "unconnected");
+        return -1;
+    }
+    int data_fd;
+    if (cfd->is_passive)
+        data_fd = passive_connect(cfd);
+    else
+        data_fd = accept(cfd->listen_fd, NULL, NULL);
+
+    if (data_fd < 0)
+
+        log(cfd, "disconnect");
+
+    return data_fd;
+}
+
 vector<string> ftp::splite_argv(const string &strp)
 {
     vector<string> args;
@@ -104,11 +157,11 @@ vector<string> ftp::splite_argv(const string &strp)
     return args;
 }
 
-void ftp::handle_stor(FD cfd, string &file_name)
+void ftp::handle_stor(client_info *cfd, string &file_name)
 {
-    int data_fd;
-    if (cfd.is_passive)
-        data_fd = passive_connect(cfd.fd);
+    int data_fd = select_mode_connect(cfd);
+    if (data_fd < 0)
+        return;
 
     string file_path = CLIENT_DIR;
     file_path += file_name;
@@ -133,11 +186,11 @@ void ftp::handle_stor(FD cfd, string &file_name)
     close(data_fd);
 }
 
-void ftp::handle_retr(FD cfd, string &file_name)
+void ftp::handle_retr(client_info *cfd, string &file_name)
 {
-    int data_fd;
-    if (cfd.is_passive)
-        data_fd = passive_connect(cfd.fd);
+    int data_fd = select_mode_connect(cfd);
+    if (data_fd < 0)
+        return;
 
     string file_path = CLIENT_DIR;
     file_path += file_name;
@@ -159,17 +212,40 @@ void ftp::handle_retr(FD cfd, string &file_name)
     close(data_fd);
 }
 
-void ftp::handle_list(FD cfd)
+void ftp::handle_list(client_info *cfd)
 {
-    int data_fd;
-    if (cfd.is_passive)
-        data_fd = passive_connect(cfd.fd);
-    else
-        data_fd = accept(cfd.listen_fd, NULL, NULL);
+    int data_fd = select_mode_connect(cfd);
+    if (data_fd < 0)
+        return;
 
     char buffer[4096];
     ssize_t bytes_recved;
     while ((bytes_recved = recv(data_fd, buffer, sizeof(buffer), 0)) > 0)
         write(STDOUT_FILENO, buffer, bytes_recved);
     close(data_fd);
+}
+
+void ftp::log(client_info *client, char *event)
+{
+    if (client->is_passive == 1)
+        cout << "[Passive Mode]";
+    else if (client->is_passive == 0)
+        cout << "[Active Mode]";
+    else if (client->is_passive == -1)
+        cout << "[Unusable Mode]";
+
+    if (strcmp("unconnected", event) == 0)
+    {
+        cout << "[Error][Unconnected but transfer data]" << endl;
+    }
+}
+
+void ftp::create_dir()
+{
+    string dirPath = CLIENT_DIR;
+    if (!filesystem::exists(dirPath))
+    {
+        if (!(filesystem::create_directories(dirPath)))
+            cout << "[Error]Failed to create directories" << endl;
+    }
 }

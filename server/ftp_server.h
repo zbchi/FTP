@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <fstream>
+#include <filesystem>
 
 #define SERVER_IP "10,30,1,227"
 #define SERVER_PORT 2100
@@ -17,8 +18,9 @@ public:
     {
         int fd;
         sockaddr_in addr;
-        bool is_passive;
+        int is_passive;
         string active_port;
+        int passive_lfd;
     };
 
     ftp();
@@ -30,14 +32,17 @@ public:
     void handle_retr(ftp::client_info *client, string &file_name);
     void handle_list(ftp::client_info *client);
 
-    int passive_connect(int command_cfd);
+    int passive_listen(ftp::client_info *client);
+    int passive_connect(ftp::client_info *client);
     int active_connect(ftp::client_info *client);
+    int select_mode_connect(ftp::client_info *client);
 
-    void log(struct sockaddr_in connect_addr, char *event);
+    void log(client_info *client, char *event);
 
     void epoll();
 
     vector<string> splite_argv(const string &strp);
+    void create_dir();
 
 private:
     threadPool pool;
