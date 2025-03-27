@@ -148,9 +148,20 @@ void ftp::handle_stor(client_info *client, string &file_name)
     if (data_fd < 0)
         return;
 
+    char buffer[4096];
+    ssize_t bytes_recved = recv(data_fd, buffer, sizeof(buffer), 0);
+    if (bytes_recved <= 0)
+    {
+        cerr << "[Failed to recevie data]" << endl;
+        close(data_fd);
+        return;
+    }
+
     string file_path = SERVER_DIR;
     file_path += file_name;
     ofstream file(file_path, ios::binary);
+
+    file.write(buffer, bytes_recved);
 
     if (!file.is_open())
     {
@@ -159,8 +170,6 @@ void ftp::handle_stor(client_info *client, string &file_name)
         return;
     }
 
-    char buffer[4096];
-    ssize_t bytes_recved;
     while ((bytes_recved = recv(data_fd, buffer, sizeof(buffer), 0)) > 0)
 
         file.write(buffer, bytes_recved);

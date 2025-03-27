@@ -7,6 +7,7 @@ int ftp::create_connect_socket(int port, string ip)
     int cfd = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;
+
     inet_pton(AF_INET, ip.c_str(), &addr.sin_addr.s_addr);
     addr.sin_port = htons(port);
 
@@ -57,8 +58,12 @@ void ftp::send_command()
         command.clear();
 
         getline(cin, command);
-        send(cfd.fd, command.c_str(), command.size(), 0);
         vector<string> commands = splite_argv(command);
+        if (commands.size() == 0)
+            continue;
+
+        send(cfd.fd, command.c_str(), command.size(), 0);
+
         if (strcmp(commands[0].c_str(), "PASV") == 0)
         {
             cfd.is_passive = true;
@@ -201,9 +206,20 @@ void ftp::handle_retr(client_info *cfd, string &file_name)
     if (data_fd < 0)
         return;
 
+    char buffer[4096];
+    ssize_t bytes_recved = recv(data_fd, buffer, sizeof(buffer), 0);
+    if (bytes_recved <= 0)
+    {
+        cerr << "[Failde to recevie data]";
+        close(data_fd);
+        return;
+    }
+
     string file_path = CLIENT_DIR;
     file_path += file_name;
     ofstream file(file_path, ios::binary);
+
+    file.write(buffer, bytes_recved);
 
     if (!file.is_open())
     {
@@ -212,8 +228,6 @@ void ftp::handle_retr(client_info *cfd, string &file_name)
         return;
     }
 
-    char buffer[4096];
-    ssize_t bytes_recved;
     while ((bytes_recved = recv(data_fd, buffer, sizeof(buffer), 0)) > 0)
         file.write(buffer, bytes_recved);
 

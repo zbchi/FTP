@@ -13,16 +13,6 @@ using namespace std;
 class ftp
 {
 public:
-    class FD
-    {
-    public:
-        int fd;
-        sockaddr_in addr;
-        int is_passive;
-        string active_port;
-        int listen_fd;
-    };
-
     struct client_info
     {
         int fd;
