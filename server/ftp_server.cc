@@ -58,7 +58,15 @@ int ftp::passive_listen(client_info *client)
 }
 int ftp::passive_connect(ftp::client_info *client)
 {
-    int data_fd = accept(client->passive_lfd, NULL, NULL);
+    struct sockaddr_in addr;
+    socklen_t len = sizeof(addr);
+    int data_fd = accept(client->passive_lfd, (struct sockaddr *)&addr, &len);
+    if (data_fd < 0)
+        return -1;
+    client_info tmp = *client;
+    tmp.addr = addr;
+    log(&tmp, "connect");
+
     return data_fd;
 }
 
@@ -67,13 +75,20 @@ int ftp::active_connect(client_info *client)
     int cfd = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in addr;
     addr = client->addr;
-    addr.sin_port = htons(stoi(client->active_port));
+
+    char *end;
+    addr.sin_port = htons(strtol(client->active_port.c_str(), &end, 10));
     int ret = connect(cfd, (struct sockaddr *)&addr, sizeof(addr));
     if (ret == -1)
     {
         perror("connect");
         return -1;
     }
+
+    client_info tmp;
+    tmp = *(client);
+    tmp.addr = addr;
+    log(&tmp, "connect");
     return cfd;
 }
 
@@ -89,11 +104,6 @@ int ftp::select_mode_connect(client_info *client)
         data_fd = passive_connect(client);
     else
         data_fd = active_connect(client);
-
-    if (data_fd > 0)
-        log(client, "connect");
-    else
-        log(client, "disconnect");
 
     return data_fd;
 }
@@ -144,7 +154,7 @@ void ftp::handle_stor(client_info *client, string &file_name)
 
     if (!file.is_open())
     {
-        cerr << "无法打开文件: " << file_path << endl;
+        cerr << "[Failed to open file:]" << file_path << endl;
         close(data_fd);
         return;
     }
@@ -170,7 +180,7 @@ void ftp::handle_retr(client_info *client, string &file_name)
     ifstream file(file_path, ios::binary);
     if (!file.is_open())
     {
-        cerr << "无法打开文件: " << file_path << endl;
+        cerr << "[Failed to open file:" << file_path << "]" << endl;
         close(data_fd);
         return;
     }

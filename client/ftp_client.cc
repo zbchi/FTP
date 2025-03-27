@@ -29,7 +29,7 @@ int ftp::create_listen_socket(int port, struct sockaddr_in &addr)
     int ret = bind(lfd, (struct sockaddr *)&addr, sizeof(addr));
     if (ret == -1)
     {
-        perror("bind");
+        cout << "[Error][Invalid port]";
         return -1;
     }
     listen(lfd, 128);
@@ -69,7 +69,10 @@ void ftp::send_command()
             cfd.active_port = commands[1];
             cfd.listen_fd = active_listen(cfd);
             if (cfd.listen_fd == -1)
-                return;
+            {
+                cfd.is_passive = -1;
+                continue;
+            }
             cfd.is_passive = false;
         }
         else if (strcmp(commands[0].c_str(), "STOR") == 0 && commands.size() == 2)
@@ -89,13 +92,19 @@ int ftp::active_listen(client_info &cfd)
 {
     struct sockaddr_in local_addr;
     int port;
+    char *end;
     try
     {
-        port = stoi(cfd.active_port);
+        port = strtol(cfd.active_port.c_str(), &end, 10);
     }
-    catch (const invalid_argument &e)
+    catch (const exception &e)
     {
-        cout << "[Invalid Argument]";
+        cout << "[Error]Invalid port:";
+        return -1;
+    }
+    if (port <= 0)
+    {
+        cout << "[Error][Invalid port]";
         return -1;
     }
     int lfd = create_listen_socket(port, local_addr);
@@ -168,7 +177,7 @@ void ftp::handle_stor(client_info *cfd, string &file_name)
     ifstream file(file_path, ios::binary);
     if (!file.is_open())
     {
-        cerr << "无法打开文件: " << file_path << endl;
+        cerr << "[Failed to open file:" << file_path << "]";
         close(data_fd);
         return;
     }
@@ -198,7 +207,7 @@ void ftp::handle_retr(client_info *cfd, string &file_name)
 
     if (!file.is_open())
     {
-        cerr << "无法打开文件: " << file_path << endl;
+        cerr << "[Failed to open file:" << file_path << "]";
         close(data_fd);
         return;
     }
